@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+
+# Load the required environment
+setup_env () {
+  # Additional environment which could be moved into a module
+  # Change these to suit
+  export RSTUDIO_SERVER_IMAGE="/opt/ohpc/pub/Software/rserver-launcher-centos7.simg"
+  export SINGULARITY_BINDPATH="/etc,/media,/mnt,/opt,/srv,/usr,/home,/data"
+  export PATH="$PATH:/usr/lib/rstudio-server/bin"
+  export SINGULARITYENV_PATH="$PATH"
+  export LD_LIBRARY_PATH="/opt/ohpc/pub/Software/R-4.0.3/lib64/R/lib:/opt/ohpc/pub/Software/R-4.0.3/lib64:/opt/ohpc/pub/Software/openblas_0.3.10/lib:/opt/ohpc/pub/mpi/openmpi3-gnu8/3.1.2/lib:/opt/ohpc/pub/compiler/gcc/8.2.0/lib64"
+  # In Singularity 3.5.x it became necessary to explicitly pass LD_LIBRARY_PATH
+  # to the singularity process
+  export SINGULARITYENV_LD_LIBRARY_PATH="$LD_LIBRARY_PATH"
+}
+setup_env
+
+#
+# Start RStudio Server
+#
+
+# PAM auth helper used by RStudio
+export RSTUDIO_AUTH="${PWD}/bin/auth"
+
+# Generate an `rsession` wrapper script
+export RSESSION_WRAPPER_FILE="${PWD}/rsession.sh"
+(
+umask 077
+sed 's/^ \{2\}//' > "${RSESSION_WRAPPER_FILE}" << EOL
+  #!/usr/bin/env bash
+
+  # Log all output from this script
+  export RSESSION_LOG_FILE="${PWD}/rsession.log"
+
+  exec &>>"\${RSESSION_LOG_FILE}"
+
+  # Launch the original command
+  echo "Launching rsession..."
+  set -x
+  exec rsession --r-libs-user "${R_LIBS_USER}" "\${@}"
+EOL
+)
+chmod 700 "${RSESSION_WRAPPER_FILE}"
+
+# Set working directory to home directory
+cd "${HOME}"
+
+export TMPDIR="$(mktemp -d)"
+
+mkdir -p "$TMPDIR/rstudio-server"
+python -c 'from uuid import uuid4; print(uuid4())' > "$TMPDIR/rstudio-server/secure-cookie-key"
+chmod 0600 "$TMPDIR/rstudio-server/secure-cookie-key"
+
+#printf 'provider=sqlite\ndirectory=/var/lib/rstudio-server\n' > $TMPDIR/database.conf
+
+set -x
+# Launch the RStudio Server
+echo "Starting up rserver..."
+
+# Confirm user
+
+#USER="$(whoami)"
+#echo ${USER}
+
+#ls -lrt $RSTUDIO_AUTH
+
+#SINGULARITYENV_LD_LIBRARY_PATH="$LD_LIBRARY_PATH" singularity exec --contain -B "$TMPDIR:/tmp" \
+# "$RSTUDIO_SERVER_IMAGE" \
+# echo $USER
+
+#ls -lrt $RSTUDIO_AUTH \
+
+singularity run -B "$TMPDIR:/tmp" "$RSTUDIO_SERVER_IMAGE" \
+ --www-port "${port}" \
+ --auth-none 0 \
+ --auth-pam-helper-path "${RSTUDIO_AUTH}" \
+ --auth-encrypt-password 0 \
+ --rsession-path "${RSESSION_WRAPPER_FILE}"
+
+#--server-user="${USER}" \
+#--server-data-dir="${TMPDIR}/rstudio-server" \
+#--secure-cookie-key-file "${TMPDIR}/rstudio-server/secure-cookie-key" \
+#,$TMPDIR/rstudio-server:/var/lib/rstudio-server
+#/tmp:/var/run,
+echo 'Singularity as exited...'
